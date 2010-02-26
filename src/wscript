@@ -1,0 +1,8 @@
+def set_options(opt) :
+	opt.sub_options('src')
+
+def configure(conf) :
+	conf.sub_config('src')
+
+def build(bld) :
+	bld.add_subdirs('src')
