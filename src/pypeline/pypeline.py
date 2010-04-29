@@ -8,8 +8,9 @@ except ImportError : # no terminalcontroller package found, replace functions wi
 	def make_msg_call(prefix) :
 		def msg(x) :
 			now = datetime.datetime.now()
-			sys.stderr.write('%s[%s]: %s\n'%(prefix,now.strftime('%Y/%m/%d-%H:%M:%S'),x))
-		return msg
+			fmt_msg = '%s[%s]: %s\n'%(prefix,now.strftime('%Y/%m/%d-%H:%M:%S'),x)
+			sys.stderr.write(fmt_msg)
+		return fmt_msg
 
 	debug = make_msg_call('DEBUG')
 	info = make_msg_call('INFO')
@@ -17,10 +18,10 @@ except ImportError : # no terminalcontroller package found, replace functions wi
 	error = make_msg_call('ERROR')
 
 def get_steplist(pipeline) :
-	info('Pipeline:')
+	info(pipeline.name)
 	for i,s in enumerate(pipeline.steps) :
 		sys.stderr.write('%d: %s\n'%(i,s.name))
-	steplist_str = raw_input('Execute which steps [all]:')
+	steplist_str = raw_input('Execute which steps (e.g. 1-2,4,6) [all]:')
 	if steplist_str == '' :
 		steplist = range(len(pipeline.steps))
 	else :
@@ -49,8 +50,10 @@ def get_steplist(pipeline) :
 class PypelineException(Exception) : pass
 
 class Pypeline :
-	def __init__(self) :
+	def __init__(self,name=None,log=None) :
 		self.steps = []
+		self.log = open(log,'w') if type(log) is str else log
+		self.name = 'Pipeline' if name is None else name
 
 	def add_step(self,step,pos=None) :
 		pos = len(self.steps) if pos is None else pos
@@ -65,13 +68,21 @@ class Pypeline :
 		if interactive :
 			steplist = get_steplist(self)
 		else :
-			steplist.sort() # just in case
+			if steplist is not None :
+				steplist.sort() # just in case
+			else :
+				steplist = range(len(self.steps)) # do all steps
 
+		results = []
 		for i,s in enumerate(self.steps) :
 			if i in steplist :
-				s.execute()
+				r = s.execute(fd=self.log)
 			else :
-				s.skip()
+				r = s.skip(fd=self.log)
+			results.append(r)
+
+		if self.log is not None :
+			self.log.close()
 
 class PypeStep :
 	"""Base pipeline step that doesn't do anything on its own.  Subclass and override the execute() method for custom functionality or use a canned class from this package (e.g. ProcessPypeStep)."""
@@ -93,6 +104,38 @@ class PypeStep :
 	def skip(self) :
 		pass # do nothing by default
 
+	def _info_msg(self,msg,fd=None) :
+		if not self.silent :
+			r = info(msg)
+			if fd is not None :
+				fd.write(r)
+
+	def _print_msg(self,msg,fd=None) :
+		if not self.silent :
+			r = msg+'\n'
+			sys.stderr.write(r)
+			if fd is not None :
+				fd.write(r)
+
+
+class PythonPypeStep(PypeStep) :
+	"""A pipeline step that accepts a python callable as its action"""
+	def __init__(self,name,callable,callable_args=(),skipcallable=lambda:True,skipcallable_args=(),silent=False,precondition=lambda:True,postcondition=lambda:True) :
+		PypeStep.__init__(self,name,silent=silent,precondition=precondition,postcondition=postcondition)
+		self.callable = callable
+		self.callable_args = callable_args
+		self.skipcallable = skipcallable
+		self.skipcallable_args = skipcallable_args
+
+	def execute(self,fd=None) :
+		self._info_msg(self.name,fd)
+		return self.callable(*self.callable_args)
+
+	def skip(self,fd=None) :
+		self._info_msg(self.name+' SKIPPED',fd)
+		return self.skipcallable(*self.skipcallable_args)
+
+
 class ProcessPypeStep(PypeStep) :
 	"""A pipeline step that wrap subprocess.Popen calls for a command line utility"""
 	def __init__(self,name,calls,skipcalls=[],silent=False,precondition=lambda:True,postcondition=lambda:True) :
@@ -100,12 +143,16 @@ class ProcessPypeStep(PypeStep) :
 		self.calls = calls if type(calls) is list else [calls]
 		self.skipcalls = skipcalls if type(skipcalls) is list else [skipcalls]
 
-	def execute(self) :
+	def execute(self,fd=None) :
+		self._info_msg(self.name,fd)
 		for cmd in self.calls :
+			self._print_msg('\t'+cmd,fd)
 			r = call(cmd,shell=True)
 
-	def skip(self) :
+	def skip(self,fd=None) :
+		self._info_msg(self.name+' SKIPPED',fd)
 		for cmd in self.skipcalls :
+			self._print_msg('\t'+cmd,fd)
 			r = call(cmd,shell=True)
 
 

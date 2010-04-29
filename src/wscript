@@ -1,8 +1,8 @@
 def set_options(opt) :
-	opt.sub_options('src')
+	opt.sub_options('pypeline')
 
 def configure(conf) :
-	conf.sub_config('src')
+	conf.sub_config('pypeline')
 
 def build(bld) :
-	bld.add_subdirs('src')
+	bld.add_subdirs('pypeline')

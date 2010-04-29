@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-from pypeline import Pypeline, ProcessPypeStep
+from pypeline import Pypeline, ProcessPypeStep, PythonPypeStep
 
 if __name__ == '__main__' :
 
-	pipeline = Pypeline()
+	pipeline = Pypeline(log='simple_example.log')
 
 	steps = []
 
@@ -19,7 +19,13 @@ if __name__ == '__main__' :
 	steps.append(ProcessPypeStep('Sort wordcount','sort -n %s'%wc_fn))
 
 	# step 4 - cleanup files
-	steps.append(ProcessPypeStep('Cleanup',"rm %s"%(" ".join([ls_fn,wc_fn]))))
+	def rm_stuff() :
+		import glob
+		from subprocess import call
+		txt_fns = glob.glob('*.txt')
+		for fn in txt_fns :
+			call('rm %s'%fn,shell=True)
+	steps.append(PythonPypeStep('Cleanup',rm_stuff))
 
 	pipeline.add_steps(steps)
 	pipeline.run(interactive=True)
