@@ -3,7 +3,7 @@ from pypeline import Pypeline, ProcessPypeStep, PythonPypeStep
 
 if __name__ == '__main__' :
 
-    pipeline = Pypeline(log='simple_example.log')
+    pipeline = Pypeline(log='simple_example.log', ignore_failure=True)
 
     steps = []
 
@@ -31,7 +31,7 @@ if __name__ == '__main__' :
     # step 5 - intentionally fail
     def epic_fail() :
         return False
-    steps.append(PythonPypeStep('Epic Failure',epic_fail))
+    steps.append(PythonPypeStep('Cheerfully Ignore Failure',epic_fail))
 
     # step 6 - whistle a happy tune
     steps.append(ProcessPypeStep('Whistle a Happy Tune','echo Whistling a happy tune'))

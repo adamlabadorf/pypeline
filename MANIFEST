@@ -1,0 +1,5 @@
+pypeline.py
+setup.cfg
+setup.py
+examples/ignore_failure_example.py
+examples/simple_example.py
