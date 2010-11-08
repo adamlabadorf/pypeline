@@ -11,7 +11,7 @@ except ImportError : # no terminalcontroller package found, replace functions wi
             now = datetime.datetime.now()
             fmt_msg = '%s[%s]: %s\n'%(prefix,now.strftime('%Y/%m/%d-%H:%M:%S'),x)
             sys.stderr.write(fmt_msg)
-        return fmt_msg
+        return msg
 
     debug = make_msg_call('DEBUG')
     info = make_msg_call('INFO')
@@ -50,6 +50,7 @@ def get_steplist(pipeline) :
 
 
 class PypelineException(Exception) : pass
+
 
 
 class Pypeline :
@@ -91,23 +92,49 @@ class Pypeline :
         if self.log is not None :
             self.log.close()
 
+
+def _check_conditions(f) :
+    """Decorator function for PypeStep subclass execute methods. Should
+    not be invoked by the user."""
+    def nf(self,*args,**kwargs):
+        self.check_precondition()
+        ret = f(self,*args,**kwargs)
+        self.check_postcondition()
+        return ret
+    return nf
+
+
 class PypeStep :
     """Base pipeline step that doesn't do anything on its own.  Subclass and override
 the execute() method for custom functionality or use a canned class from this
 package (e.g. ProcessPypeStep)."""
 
-    def __init__(self,name,silent=False,precondition=lambda:True,postcondition=lambda:True) :
+    def __init__(self,name,silent=False,precondition=lambda:True,postcondition=lambda:True,ignore_failure=False) :
         self.name = name
         self.silent = silent
         self.precondition = precondition
         self.postcondition = postcondition
+        self.ignore_failure = ignore_failure
 
-    def precondition_met(self) :
-        return self.precondition()
+    def check_precondition(self) :
+        precond_met = self.precondition() == True
+        if not precond_met :
+            if ignore_failure :
+                self._print_msg('\tPrecondition not met but ignoring failures, skipping')
+            else :
+                self._print_msg('\tPrecondition not met, dying')
+                raise PypelineException('Precondition not met for step %s'%self.name)
 
-    def postcondition_met(self) :
-        return self.postcondition()
+    def check_postcondition(self) :
+        postcond_met = self.postcondition() == True
+        if not postcond_met and not ignore_failure :
+            if ignore_failure :
+                self._print_msg('\tPrecondition not met but ignoring failures, skipping')
+            else :
+                self._print_msg('\tPrecondition not met, dying')
+                raise PypelineException('Precondition not met for step %s'%self.name)
 
+    @_check_conditions
     def execute(self) :
         raise PypelineException('PypeStep.execute() method is not defined, override in subclasses of PypeStep')
 
@@ -131,16 +158,18 @@ package (e.g. ProcessPypeStep)."""
 class PythonPypeStep(PypeStep) :
     """A pipeline step that accepts a python callable as its action"""
 
-    def __init__(self,name,callable,callable_args=(),skipcallable=lambda:True,skipcallable_args=(),silent=False,precondition=lambda:True,postcondition=lambda:True) :
-        PypeStep.__init__(self,name,silent=silent,precondition=precondition,postcondition=postcondition)
+    def __init__(self,name,callable,callable_args=(),callable_kwargs={},skipcallable=lambda:True,skipcallable_args=(),silent=False,precondition=lambda:True,postcondition=lambda:True,ignore_failure=False) :
+        PypeStep.__init__(self,name,silent=silent,precondition=precondition,postcondition=postcondition,ignore_failure=ignore_failure)
         self.callable = callable
         self.callable_args = callable_args
         self.skipcallable = skipcallable
         self.skipcallable_args = skipcallable_args
 
+    @_check_conditions
     def execute(self,fd=None) :
         self._info_msg(self.name,fd)
-        return self.callable(*self.callable_args)
+        r = self.callable(*self.callable_args,**self.callable_kwargs)
+        return r
 
     def skip(self,fd=None) :
         self._info_msg(self.name+' SKIPPED',fd)
@@ -151,20 +180,22 @@ class ProcessPypeStep(PypeStep) :
     """A pipeline step that wrap subprocess.Popen calls for a command line utility"""
 
     def __init__(self,name,calls,skipcalls=[],silent=False,precondition=lambda:True,postcondition=lambda:True,env={},ignore_failure=False) :
-        PypeStep.__init__(self,name,silent=silent,precondition=precondition,postcondition=postcondition)
+        PypeStep.__init__(self,name,silent=silent,precondition=precondition,postcondition=postcondition,ignore_failure = ignore_failure)
         self.calls = calls if type(calls) is list else [calls]
         self.skipcalls = skipcalls if type(skipcalls) is list else [skipcalls]
         self.env = env
-        self.ignore_failure = ignore_failure
 
+    @_check_conditions
     def execute(self,fd=None) :
         self._info_msg(self.name,fd)
         r = 0
+
         for cmd in self.calls :
             self._print_msg('\t'+cmd,fd)
             r = call(cmd,shell=True,env=self.env)
             if not self.ignore_failure and r != 0 : # presumed failure
                 break
+
         return self.ignore_failure or r == 0
 
     def skip(self,fd=None) :
