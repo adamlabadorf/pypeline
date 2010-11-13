@@ -11,6 +11,7 @@ except ImportError : # no terminalcontroller package found, replace functions wi
             now = datetime.datetime.now()
             fmt_msg = '%s[%s]: %s\n'%(prefix,now.strftime('%Y/%m/%d-%H:%M:%S'),x)
             sys.stderr.write(fmt_msg)
+            return fmt_msg
         return msg
 
     debug = make_msg_call('DEBUG')
@@ -21,9 +22,6 @@ except ImportError : # no terminalcontroller package found, replace functions wi
 class Tee(object):
     """File object that writes to both a file and to stdout, like the unix
        `tee` command"""
-
-    control_chars = ''.join(map(unichr, range(0,32) + range(127,160)))
-    control_char_re = re.compile('[%s]' % re.escape(control_chars))
 
     def __init__(self, name=None, mode='w', fd=None, std_fd=sys.stdout):
 
@@ -44,16 +42,28 @@ class Tee(object):
         self.std_fd.flush()
 
     def write(self, data):
-        #self.file.write(Tee.control_char_re.sub('',data))
         self.file.write(data)
         self.std_fd.write(data)
 
 def get_steplist(pipeline) :
-    r = info(pipeline.name,fd=pipeline.out_f.std_fd)
-    pipeline.out_f.file.write(r)
+
+    # figure out if pipeline is using a Tee object
+    # so we handle printing correctly
+    if pipeline.out_f.__class__ == Tee :
+        r = info(pipeline.name,fd=pipeline.out_f.std_fd)
+        pipeline.out_f.file.write(r)
+    else :
+        r = info(pipeline.name,fd=pipeline.out_f)
+
     for i,s in enumerate(pipeline.steps) :
         pipeline.out_f.write('%d: %s\n'%(i,s.name))
-    steplist_str = raw_input('Execute which steps (e.g. 1-2,4,6) [all]:')
+
+    prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
+    steplist_str = raw_input(prompt)
+
+    if pipeline.out_f.__class__ == Tee :
+        pipeline.out_f.file.write(prompt+steplist_str+'\n')
+
     if steplist_str == '' :
         steplist = range(len(pipeline.steps))
     else :
@@ -174,8 +184,13 @@ package (e.g. ProcessPypeStep)."""
 
     def _info_msg(self,msg) :
         if not self.silent :
-            r = info(msg,fd=self.out_f.std_fd)
-            self.out_f.file.write(str(r))
+            # separate printing to terminal and fd to avoid
+            # writing terminal control characters to file
+            if self.out_f.__class__ == Tee :
+                r = info(msg,fd=self.out_f.std_fd)
+                self.out_f.file.write(str(r))
+            else :
+                info(msg,fd=self.out_f)
 
     def _print_msg(self,msg) :
         if not self.silent :
