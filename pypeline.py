@@ -1,5 +1,10 @@
+import os
+import select
 import sys
+import threading
+
 from subprocess import call
+
 
 try :
     from terminalcontroller import *
@@ -7,7 +12,7 @@ except ImportError : # no terminalcontroller package found, replace functions wi
     import datetime
     # use closures
     def make_msg_call(prefix) :
-        def msg(x) :
+        def msg(x,fd=None) :
             now = datetime.datetime.now()
             fmt_msg = '%s[%s]: %s\n'%(prefix,now.strftime('%Y/%m/%d-%H:%M:%S'),x)
             sys.stderr.write(fmt_msg)
@@ -19,50 +24,50 @@ except ImportError : # no terminalcontroller package found, replace functions wi
     warn = make_msg_call('WARN')
     error = make_msg_call('ERROR')
 
-class Tee(object):
-    """File object that writes to both a file and to stdout, like the unix
-       `tee` command"""
+def write_identity(st,fd=None) :
+    if fd :
+        fd.write(st)
+    return st
 
-    def __init__(self, name=None, mode='w', fd=None, std_fd=sys.stdout):
+class Tee(threading.Thread) :
 
-        if (name and fd) or (not name and not fd) :
-            raise Exception('The name and fd arguments to the Tee class are mutually exclusive')
-        elif name :
-            self.file = open(name, mode)
-        elif fd :
-            self.file = fd
+    def __init__(self,wlist,group=None, target=None, name=None, args=(), kwargs={}) :
+        threading.Thread.__init__(self,group,target,name,args,kwargs)
+        self.r, self.w = os.pipe()
+        self.in_r = os.fdopen(self.r,'r')
+        self.out_w = os.fdopen(self.w,'w')
+        self.wlist = wlist
+        self.daemon = True
+        self.stop = False
 
-        self.std_fd = std_fd
+    def run(self) :
+        while not self.stop :
+            self.out_w.flush()
+            i,o,e = select.select([self.in_r],[],[],1)
+            if len(i) == 1 :
+                done = False
+                w_str = ''
+                while not done :
+                    o_str = os.read(i[0].fileno(),512)
+                    if len(o_str) < 512 :
+                        done = True
+                    w_str += o_str
+                for w in self.wlist :
+                    w.write(w_str)
+                    w.flush()
+        self.in_r.close()
+        self.out_w.close()
 
-    def __del__(self):
-        self.file.close()
-
-    def flush(self) :
-        self.file.flush()
-        self.std_fd.flush()
-
-    def write(self, data):
-        self.file.write(data)
-        self.std_fd.write(data)
 
 def get_steplist(pipeline) :
 
-    # figure out if pipeline is using a Tee object
-    # so we handle printing correctly
-    if pipeline.out_f.__class__ == Tee :
-        r = info(pipeline.name,fd=pipeline.out_f.std_fd)
-        pipeline.out_f.file.write(r)
-    else :
-        r = info(pipeline.name,fd=pipeline.out_f)
-
     for i,s in enumerate(pipeline.steps) :
-        pipeline.out_f.write('%d: %s\n'%(i,s.name))
+        pipeline.printout('%d: %s\n'%(i,s.name))
 
     prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
     steplist_str = raw_input(prompt)
 
-    if pipeline.out_f.__class__ == Tee :
-        pipeline.out_f.file.write(prompt+steplist_str+'\n')
+    pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stdout])
 
     if steplist_str == '' :
         steplist = range(len(pipeline.steps))
@@ -74,14 +79,14 @@ def get_steplist(pipeline) :
                 try :
                     st,sp = int(st),int(sp)
                 except :
-                    sys.stderr.write('Invalid span argument, aborting: %s'%arg)
+                    pipeline.error('Invalid span argument, aborting: %s'%arg)
                     sys.exit(1)
                 steplist.extend(range(st,sp+1))
             else :
                 try :
                     st = int(arg)
                 except :
-                    sys.stderr.write('Invalid span argument, aborting: %s'%arg)
+                    pipeline.error('Invalid span argument, aborting: %s'%arg)
                     sys.exit(1)
                 steplist.append(st)
 
@@ -95,23 +100,52 @@ class PypelineException(Exception) : pass
 class Pypeline :
     def __init__(self,name=None,log=None,ignore_failure=False) :
         self.steps = []
+        out_fds = [sys.stdout]
         if log :
-            self.out_f = Tee(fd=log) if hasattr(log,'write') else Tee(name=log,mode='w')
-        else :
-            self.out_f = sys.stdout
+            out_fds.append(open(log,'a'))
+        self.tee_t = Tee(out_fds)
+        self.out_f = self.tee_t.out_w
+        self.tee_t.start()
 
         self.name = 'Pipeline' if name is None else name
         self.ignore_failure = ignore_failure
 
+        self.announce(self.name)
+
     def add_step(self,step,pos=None) :
         pos = len(self.steps) if pos is None else pos
-        step.out_f = self.out_f
+        step.pipeline = self
         self.steps.insert(pos,step)
 
     def add_steps(self,steps,pos=None) :
         pos = len(self.steps) if pos is None else pos
         for i,s in enumerate(steps) :
             self.add_step(s,pos=pos+i)
+
+    def announce(self,st) :
+        self._write_output(st,announce)
+
+    def info(self,st) :
+        self._write_output(st,info)
+
+    def warn(self,st) :
+        self._write_output(st,warn)
+
+    def error(self,st) :
+        self._write_output(st,error)
+
+    def printout(self,st,exclude=[]) :
+        self._write_output(st,write_identity,exclude=exclude)
+
+    def _write_output(self,st,fn,exclude=[]) :
+        r = fn(st,fd=None)
+        for fd in self.tee_t.wlist :
+            if fd in exclude :
+                continue
+            elif fd in (sys.stdout, sys.stderr) :
+                fn(st,fd=fd)
+            else :
+                fd.write(r)
 
     def run(self,interactive=False,steplist=None) :
         if interactive :
@@ -130,8 +164,9 @@ class Pypeline :
                 r = s.skip()
             results.append(r)
             if not self.ignore_failure and r is False :
-                sys.stderr.write('Step %d failed, aborting pipeline\n'%i)
+                self.error('Step %d failed, aborting pipeline\n'%i)
                 break
+        self.tee_t.stop = True
 
 
 def _check_conditions(f) :
@@ -184,18 +219,12 @@ package (e.g. ProcessPypeStep)."""
 
     def _info_msg(self,msg) :
         if not self.silent :
-            # separate printing to terminal and fd to avoid
-            # writing terminal control characters to file
-            if self.out_f.__class__ == Tee :
-                r = info(msg,fd=self.out_f.std_fd)
-                self.out_f.file.write(str(r))
-            else :
-                info(msg,fd=self.out_f)
+            self.pipeline.info(msg)
 
     def _print_msg(self,msg) :
         if not self.silent :
             r = msg+'\n'
-            self.out_f.write(r)
+            self.pipeline.printout(r)
 
 
 class PythonPypeStep(PypeStep) :
@@ -267,7 +296,9 @@ class ProcessPypeStep(PypeStep) :
 
         for cmd in self.calls :
             self._print_msg('\t'+cmd)
-            r = call(cmd,shell=True,env=self.env,stdout=self.out_f,stderr=self.out_f)
+            r = call(cmd,shell=True,env=self.env,
+                     stdout=self.pipeline.tee_t.out_w,
+                     stderr=self.pipeline.out_f)
             if not self.ignore_failure and r != 0 : # presumed failure
                 break
 
