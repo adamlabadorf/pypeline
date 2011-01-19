@@ -263,9 +263,9 @@ class PythonPypeStep(PypeStep) :
 
         # swap out sys.stdout, sys.stderr for pipeline's fd object
         old_stdout, old_stderr = sys.stdout, sys.stderr
-        print 'switching fds'
+        #print 'switching fds'
         #sys.stdout, sys.stderr = self.pipeline.tee_t.out_w, self.pipeline.tee_t.out_w
-        print 'done switching fds'
+        #print 'done switching fds'
 
         # who you gonna call?
         r = self.callable(*self.callable_args,**self.callable_kwargs)
