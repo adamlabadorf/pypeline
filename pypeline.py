@@ -1,4 +1,5 @@
 import os
+import re
 import select
 import sys
 import threading
@@ -65,6 +66,7 @@ def get_steplist(pipeline) :
         pipeline.printout('%d: %s\n'%(i,s.name))
 
     prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
+
     steplist_str = raw_input(prompt)
 
     pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stdout])
@@ -148,25 +150,30 @@ class Pypeline :
                 fd.write(r)
 
     def run(self,interactive=False,steplist=None) :
-        if interactive :
-            steplist = get_steplist(self)
-        else :
-            if steplist is not None :
-                steplist.sort() # just in case
-            else :
-                steplist = range(len(self.steps)) # do all steps
 
-        results = []
-        for i,s in enumerate(self.steps) :
-            if i in steplist :
-                r = s.execute()
+        try :
+            if interactive :
+                steplist = get_steplist(self)
             else :
-                r = s.skip()
-            results.append(r)
-            if not self.ignore_failure and r is False :
-                self.error('Step %d failed, aborting pipeline\n'%i)
-                break
-        self.tee_t.stop = True
+                if steplist is not None :
+                    steplist.sort() # just in case
+                else :
+                    steplist = range(len(self.steps)) # do all steps
+
+            results = []
+            for i,s in enumerate(self.steps) :
+                if i in steplist :
+                    r = s.execute()
+                else :
+                    r = s.skip()
+                results.append(r)
+                if not self.ignore_failure and r is False :
+                    self.error('Step %d failed, aborting pipeline\n'%i)
+                    break
+        except KeyboardInterrupt :
+            self.printout('\nPipeline interrupted by user, aborting\n')
+        finally :
+            self.tee_t.stop = True
 
 
 def _check_conditions(f) :
@@ -256,7 +263,9 @@ class PythonPypeStep(PypeStep) :
 
         # swap out sys.stdout, sys.stderr for pipeline's fd object
         old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout, sys.stderr = self.out_f, self.out_f
+        print 'switching fds'
+        #sys.stdout, sys.stderr = self.pipeline.tee_t.out_w, self.pipeline.tee_t.out_w
+        print 'done switching fds'
 
         # who you gonna call?
         r = self.callable(*self.callable_args,**self.callable_kwargs)
@@ -274,11 +283,11 @@ class ProcessPypeStep(PypeStep) :
     """A pipeline step that wrap subprocess.Popen calls for a command line utility"""
 
     def __init__(self,name,calls,
-                 skipcalls=[],
+                 skipcalls=None,
                  silent=False,
                  precondition=lambda:True,
                  postcondition=lambda:True,
-                 env={},
+                 env=None,
                  ignore_failure=False) :
         PypeStep.__init__(self,name,
                           silent=silent,
@@ -286,8 +295,13 @@ class ProcessPypeStep(PypeStep) :
                           postcondition=postcondition,
                           ignore_failure = ignore_failure)
         self.calls = calls if type(calls) is list else [calls]
-        self.skipcalls = skipcalls if type(skipcalls) is list else [skipcalls]
-        self.env = env
+        skipcalls = skipcalls or []
+        try :
+            iter(skipcalls)
+        except TypeError :
+            skipcalls = tuple(skipcalls)
+        self.skipcalls = skipcalls
+        self.env = env or {}
 
     @_check_conditions
     def execute(self) :
@@ -296,6 +310,9 @@ class ProcessPypeStep(PypeStep) :
 
         for cmd in self.calls :
             self._print_msg('\t'+cmd)
+            # filter out extra whitespace
+            cmd = cmd.strip()
+            cmd = re.sub(r'\s+',r' ',cmd)
             r = call(cmd,shell=True,env=self.env,
                      stdout=self.pipeline.tee_t.out_w,
                      stderr=self.pipeline.out_f)
