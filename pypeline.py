@@ -67,9 +67,11 @@ def get_steplist(pipeline) :
 
     prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
 
-    steplist_str = raw_input(prompt)
+    sys.stderr.write(prompt)
+    #steplist_str = raw_input(prompt)
+    steplist_str = sys.stdin.readline()
 
-    pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stdout])
+    pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stderr])
 
     if steplist_str == '' :
         steplist = range(len(pipeline.steps))
@@ -102,7 +104,7 @@ class PypelineException(Exception) : pass
 class Pypeline :
     def __init__(self,name=None,log=None,ignore_failure=False) :
         self.steps = []
-        out_fds = [sys.stdout]
+        out_fds = [sys.stderr]
         if log :
             out_fds.append(open(log,'a'))
         self.tee_t = Tee(out_fds)
@@ -175,6 +177,8 @@ class Pypeline :
         finally :
             self.tee_t.stop = True
 
+        return results
+
 
 def _check_conditions(f) :
     """Decorator function for PypeStep subclass execute methods. Should
@@ -240,7 +244,7 @@ class PythonPypeStep(PypeStep) :
     def __init__(self,name,callable,
                  callable_args=(),
                  callable_kwargs={},
-                 skipcallable=lambda:True,
+                 skipcallable=lambda:None,
                  skipcallable_args=(),
                  silent=False,
                  precondition=lambda:True,
