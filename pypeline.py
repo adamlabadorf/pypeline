@@ -73,7 +73,7 @@ def get_steplist(pipeline) :
 
     pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stderr])
 
-    if steplist_str == '' :
+    if steplist_str.strip() == '' :
         steplist = range(len(pipeline.steps))
     else :
         steplist = []
