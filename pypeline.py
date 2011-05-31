@@ -121,6 +121,9 @@ class Pypeline :
         self.name = 'Pipeline' if name is None else name
         self.ignore_failure = ignore_failure
 
+        self.curr_step_num = None
+        self.curr_step_name = None
+
         self.announce(self.name)
 
     def add_step(self,step,pos=None) :
@@ -171,6 +174,8 @@ class Pypeline :
 
             results = []
             for i,s in enumerate(self.steps) :
+                self.curr_step_num = i
+                self.curr_step_name = s.name
                 if i in steplist :
                     r = s.execute()
                 else :
