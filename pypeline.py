@@ -59,19 +59,7 @@ class Tee(threading.Thread) :
         self.in_r.close()
         self.out_w.close()
 
-
-def get_steplist(pipeline) :
-
-    for i,s in enumerate(pipeline.steps) :
-        pipeline.printout('%d: %s\n'%(i,s.name))
-
-    prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
-
-    sys.stderr.write(prompt)
-    #steplist_str = raw_input(prompt)
-    steplist_str = sys.stdin.readline()
-
-    pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stderr])
+def parse_steplist(steplist_str) :
 
     if steplist_str.strip() == '' :
         steplist = range(len(pipeline.steps))
@@ -95,6 +83,25 @@ def get_steplist(pipeline) :
                 steplist.append(st)
 
     steplist.sort()
+
+    return steplist
+
+
+def get_steplist(pipeline) :
+
+    for i,s in enumerate(pipeline.steps) :
+        pipeline.printout('%d: %s\n'%(i,s.name))
+
+    prompt = 'Execute which steps (e.g. 1-2,4,6) [all]:'
+
+    sys.stderr.write(prompt)
+    #steplist_str = raw_input(prompt)
+    steplist_str = sys.stdin.readline()
+
+    pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stderr])
+
+    steplist = parse_steplist(steplist_str)
+
     return steplist
 
 
