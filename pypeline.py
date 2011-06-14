@@ -2,10 +2,33 @@ import os
 import re
 import select
 import sys
+import textwrap
 import threading
 
 from subprocess import call
 
+from optparse import IndentedHelpFormatter
+
+class MultiLineHelpFormatter(IndentedHelpFormatter) :
+    """An OptionParser formatter that preserves newline characters in
+    description and epilog fields and word-wraps all sequences of text
+    not interrupted by newline characters.
+    """
+
+    def _format_text(self, text) :
+        """Wrap paragraphs of text individually separated by
+        newlines (preserves explicit newline characters).
+        """
+        text_width = self.width - self.current_indent
+        indent = " "*self.current_indent
+        output_text = []
+        paragraphs = text.split('\n')
+        for p in paragraphs :
+            output_text.append(textwrap.fill(p,
+                                             text_width,
+                                             initial_indent=indent,
+                                             subsequent_indent=indent))
+        return '\n'.join(output_text)
 
 try :
     from terminalcontroller import *
@@ -59,7 +82,32 @@ class Tee(threading.Thread) :
         self.in_r.close()
         self.out_w.close()
 
-def parse_steplist(steplist_str) :
+def parse_steplist_str(steplist_str) :
+
+    if steplist_str is None or len(steplist_str.strip()) == 0 :
+        steplist = []
+    else :
+        steplist = []
+        for arg in steplist_str.split(',') :
+            if arg.find('-') != -1 : # we have a span argument
+                st,sp = arg.split('-')
+                try :
+                    st,sp = int(st),int(sp)
+                except :
+                    raise Exception('Invalid span argument, aborting: %s'%arg)
+                    sys.exit(1)
+                steplist.extend(range(st,sp+1))
+            else :
+                try :
+                    st = int(arg)
+                except :
+                    raise Exception('Invalid span argument, aborting: %s'%arg)
+                    sys.exit(1)
+                steplist.append(st)
+
+    return steplist
+
+def parse_steplist(steplist_str,pipeline) :
 
     if steplist_str.strip() == '' :
         steplist = range(len(pipeline.steps))
@@ -100,7 +148,7 @@ def get_steplist(pipeline) :
 
     pipeline.printout(prompt+steplist_str+'\n',exclude=[sys.stderr])
 
-    steplist = parse_steplist(steplist_str)
+    steplist = parse_steplist(steplist_str,pipeline)
 
     return steplist
 
